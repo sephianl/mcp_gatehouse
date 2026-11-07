@@ -58,7 +58,7 @@ defmodule McpGatehouse.MixProject do
   defp deps do
     [
       {:ash, "~> 3.33"},
-      {:ash_ai, github: "sephianl/ash_ai", ref: "0ea0932f86d05669f9f58c119e6a36d7f1c38e9a"},
+      {:ash_ai, github: "sephianl/ash_ai", ref: "eec36c71373eff818ca641822d2164441f2e00c4"},
       {:plug, "~> 1.17"},
       {:jason, "~> 1.4"},
       {:hammer, "~> 7.5"},
