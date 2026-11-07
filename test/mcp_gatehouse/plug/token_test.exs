@@ -23,10 +23,10 @@ defmodule McpGatehouse.Plug.TokenTest do
   alias McpGatehouse.Test.StaleGrantServer
   alias McpGatehouse.Test.User
 
-  defp authorized(user \\ User.admin()) do
+  defp authorized do
     %{"client_id" => client_id} = Flow.register()
     {verifier, challenge} = Flow.pkce()
-    %{"code" => code} = client_id |> Flow.approve(challenge, user) |> Flow.query()
+    %{"code" => code} = client_id |> Flow.approve(challenge, User.admin()) |> Flow.query()
 
     %{client_id: client_id, code: code, verifier: verifier}
   end
@@ -39,8 +39,6 @@ defmodule McpGatehouse.Plug.TokenTest do
              "error_description" => "the authorization code or verifier is invalid"
            }
   end
-
-  defp works?(access_token), do: Flow.rpc("tools/list", %{}, access_token).status == 200
 
   defp row_for(refresh_token) do
     {:ok, row} = AccessToken.get_by_refresh_token(refresh_token, actor: ServerActor.new())
@@ -76,7 +74,7 @@ defmodule McpGatehouse.Plug.TokenTest do
 
       assert_invalid_grant(Flow.exchange_code(client_id, code, "not-the-verifier"))
       assert_invalid_grant(Flow.exchange_code(client_id, code, verifier))
-      assert works?(tokens["access_token"])
+      assert Flow.authenticates?(tokens["access_token"])
     end
 
     test "the wrong verifier does not exchange" do
@@ -175,15 +173,17 @@ defmodule McpGatehouse.Plug.TokenTest do
       assert_invalid_grant(Flow.refresh(client_id, tokens["refresh_token"]))
     end
 
-    test "a replay within the grace period is refused but leaves the successor alone", %{
-      client_id: client_id,
-      tokens: tokens
-    } do
+    test "a replay within the five-second grace period is refused but leaves the successor alone",
+         %{
+           client_id: client_id,
+           tokens: tokens
+         } do
       rotated = client_id |> Flow.refresh(tokens["refresh_token"]) |> Flow.json()
+      backdate(tokens["refresh_token"], 4, :revoked_at)
 
       assert_invalid_grant(Flow.refresh(client_id, tokens["refresh_token"]))
 
-      assert works?(rotated["access_token"])
+      assert Flow.authenticates?(rotated["access_token"])
       assert Flow.refresh(client_id, rotated["refresh_token"]).status == 200
     end
 
@@ -194,8 +194,8 @@ defmodule McpGatehouse.Plug.TokenTest do
     } do
       rotated = client_id |> Flow.refresh(tokens["refresh_token"]) |> Flow.json()
       sibling = second_consent(client_id, user)
-      assert works?(sibling["access_token"])
-      backdate(tokens["refresh_token"], 10, :revoked_at)
+      assert Flow.authenticates?(sibling["access_token"])
+      backdate(tokens["refresh_token"], 6, :revoked_at)
 
       log =
         ExUnit.CaptureLog.capture_log(fn ->
@@ -203,10 +203,10 @@ defmodule McpGatehouse.Plug.TokenTest do
         end)
 
       assert log =~ "revoked MCP refresh token presented again; revoked 2 live token(s)"
-      refute works?(rotated["access_token"])
+      refute Flow.authenticates?(rotated["access_token"])
       assert_invalid_grant(Flow.refresh(client_id, rotated["refresh_token"]))
       assert row_for(rotated["refresh_token"]).revoked_at
-      refute works?(sibling["access_token"])
+      refute Flow.authenticates?(sibling["access_token"])
       assert_invalid_grant(Flow.refresh(client_id, sibling["refresh_token"]))
       assert row_for(sibling["refresh_token"]).revoked_at
     end
@@ -228,7 +228,7 @@ defmodule McpGatehouse.Plug.TokenTest do
       assert log =~ "revoked 2 live token(s)"
 
       for successor <- [rotated, sibling] do
-        refute works?(successor["access_token"])
+        refute Flow.authenticates?(successor["access_token"])
         assert row_for(successor["refresh_token"]).revoked_at
       end
     end
@@ -257,7 +257,23 @@ defmodule McpGatehouse.Plug.TokenTest do
         assert log =~ id
       end
 
-      assert works?(rotated["access_token"])
+      assert Flow.authenticates?(rotated["access_token"])
+    end
+
+    test "another client cannot rotate a live refresh token", %{
+      client_id: client_id,
+      tokens: tokens
+    } do
+      %{"client_id" => other} = Flow.register()
+
+      assert_invalid_grant(Flow.refresh(other, tokens["refresh_token"]))
+      assert is_nil(row_for(tokens["refresh_token"]).revoked_at)
+      assert Flow.refresh(client_id, tokens["refresh_token"]).status == 200
+    end
+
+    test "an access token is not a refresh token", %{client_id: client_id, tokens: tokens} do
+      assert_invalid_grant(Flow.refresh(client_id, tokens["access_token"]))
+      assert Flow.authenticates?(tokens["access_token"])
     end
 
     test "a replay by another client revokes nothing", %{client_id: client_id, tokens: tokens} do
@@ -268,7 +284,7 @@ defmodule McpGatehouse.Plug.TokenTest do
       %{"client_id" => other} = Flow.register()
 
       assert_invalid_grant(Flow.refresh(other, tokens["refresh_token"]))
-      assert works?(rotated["access_token"])
+      assert Flow.authenticates?(rotated["access_token"])
     end
 
     test "the grant's other clients and users are untouched by a replay", %{
@@ -282,8 +298,8 @@ defmodule McpGatehouse.Plug.TokenTest do
 
       ExUnit.CaptureLog.capture_log(fn -> Flow.refresh(client_id, tokens["refresh_token"]) end)
 
-      refute works?(rotated["access_token"])
-      assert works?(bystander.tokens["access_token"])
+      refute Flow.authenticates?(rotated["access_token"])
+      assert Flow.authenticates?(bystander.tokens["access_token"])
     end
 
     test "a refresh token idle past the server's TTL no longer rotates", %{
@@ -346,13 +362,15 @@ defmodule McpGatehouse.Plug.TokenTest do
     assert Flow.json(conn) == %{"error" => "unsupported_grant_type"}
   end
 
-  test "credential responses forbid storage" do
+  test "token responses forbid storage, whether issued or refused" do
     %{client_id: client_id, code: code, verifier: verifier} = authorized()
 
-    for conn <- [
-          Flow.exchange_code(client_id, code, verifier),
-          Flow.exchange_code(client_id, code, verifier)
-        ] do
+    issued = Flow.exchange_code(client_id, code, verifier)
+    refused = Flow.exchange_code(client_id, code, verifier)
+
+    assert {issued.status, refused.status} == {200, 400}
+
+    for conn <- [issued, refused] do
       assert Plug.Conn.get_resp_header(conn, "cache-control") == ["no-store"]
       assert Plug.Conn.get_resp_header(conn, "pragma") == ["no-cache"]
     end

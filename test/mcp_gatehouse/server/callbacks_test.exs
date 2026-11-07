@@ -35,7 +35,7 @@ defmodule McpGatehouse.Server.CallbacksTest do
 
   test "filtered parameters default to the OTP app's configured list" do
     assert Callbacks.filtered_parameters(MinimalServer) ==
-             Application.fetch_env!(:mcp_gatehouse, :filtered_parameters)
+             ~w(password token secret code_verifier code_challenge iban)
   end
 
   test "filtered parameters fall back to the credential names when the app configures none" do
@@ -44,7 +44,11 @@ defmodule McpGatehouse.Server.CallbacksTest do
   end
 
   test "a server's own answers win" do
-    assert Callbacks.context(ConfiguredServer, %{}) == %{api?: true}
+    assert Callbacks.context(ConfiguredServer, %{}) == %{
+             api?: true,
+             mcp_scopes: ["mcp:read", "mcp:write"]
+           }
+
     assert Callbacks.filtered_parameters(ConfiguredServer) == ["fuel", "apiKey"]
     assert Callbacks.analytics_payloads(ConfiguredServer) == :full
     assert Callbacks.trusted_proxies(ConfiguredServer) == ["35.191.0.0/16"]

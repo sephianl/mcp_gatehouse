@@ -86,7 +86,24 @@ defmodule McpGatehouse.Plug.AnalyticsTest do
     assert_received {:captured, "$mcp_tool_call", _distinct_id, _company_id, properties}
 
     assert properties[:"$mcp_is_error"] == true
-    assert properties[:"$mcp_error_message"]
+    assert properties[:"$mcp_error_type"] == "validation"
+    assert properties[:"$mcp_error_message"] =~ "no_such_tool"
+  end
+
+  test "a context that is not a string is not reported as intent", %{token: token} do
+    Flow.rpc(
+      "tools/call",
+      %{
+        "name" => "list_widgets",
+        "arguments" => %{"input" => %{"context" => %{"goal" => "stock"}}}
+      },
+      token
+    )
+
+    assert_received {:captured, "$mcp_tool_call", _distinct_id, _company_id, properties}
+
+    refute Map.has_key?(properties, :"$mcp_intent")
+    refute Map.has_key?(properties, :"$mcp_intent_source")
   end
 
   test "a reported gap is captured as a missing capability, carrying what was asked for", %{
@@ -132,13 +149,16 @@ defmodule McpGatehouse.Plug.AnalyticsTest do
     |> put_req_header("authorization", "Bearer " <> token)
     |> put_req_header("mcp-session-id", "session-1")
     |> put_req_header("user-agent", "claude-user-agent")
+    |> put_req_header("x-anthropic-client", "claude-code")
     |> Router.call(Router.init([]))
 
     assert_received {:captured, "$mcp_initialize", _distinct_id, _company_id, properties}
 
     assert properties[:"$mcp_protocol_version"] == "2025-06-18"
     assert properties[:"$mcp_client_name"] == "claude-ai"
+    assert properties[:"$mcp_client_version"] == "0.1.0"
     assert properties[:"$mcp_client_user_agent"] == "claude-user-agent"
+    assert properties[:"$mcp_vendor_client"] == "claude-code"
 
     assert properties[:"$session_id"] ==
              "ses_" <>
@@ -148,11 +168,15 @@ defmodule McpGatehouse.Plug.AnalyticsTest do
                 |> binary_part(0, 32))
   end
 
-  test "credential-shaped keys are redacted at any depth", %{token: token} do
+  test "keys containing a configured filtered parameter are redacted at any depth", %{
+    token: token
+  } do
     input = %{
       "password" => "hunter2",
       "barcode" => "3SBAR123456",
-      "nested" => [%{"api_token" => "abc", "postcode" => "1234AB"}]
+      "nested" => [
+        %{"api_token" => "abc", "postcode" => "1234AB", "payout_iban" => "NL91ABNA0417164300"}
+      ]
     }
 
     Flow.rpc("tools/call", %{"name" => "list_widgets", "arguments" => %{"input" => input}}, token)
@@ -162,7 +186,13 @@ defmodule McpGatehouse.Plug.AnalyticsTest do
     assert properties[:"$mcp_parameters"] == %{
              "password" => "[REDACTED]",
              "barcode" => "3SBAR123456",
-             "nested" => [%{"api_token" => "[REDACTED]", "postcode" => "1234AB"}]
+             "nested" => [
+               %{
+                 "api_token" => "[REDACTED]",
+                 "postcode" => "1234AB",
+                 "payout_iban" => "[REDACTED]"
+               }
+             ]
            }
   end
 

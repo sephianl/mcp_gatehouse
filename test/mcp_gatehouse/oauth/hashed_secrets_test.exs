@@ -30,8 +30,6 @@ defmodule McpGatehouse.OAuth.HashedSecretsTest do
 
     assert row.token_hash == OpaqueToken.hash(token)
     assert row.refresh_token_hash == OpaqueToken.hash(refresh_token)
-    refute row.token_hash == token
-    refute row.refresh_token_hash == refresh_token
     refute Map.has_key?(row.__metadata__, :token)
   end
 
@@ -50,23 +48,9 @@ defmodule McpGatehouse.OAuth.HashedSecretsTest do
   end
 
   test "the authorization code column holds the hash and still resolves from the raw value" do
-    user = User.admin()
-
-    {:ok, issued} =
-      AuthorizationCode.issue(
-        %{
-          client_id: "hashing-client",
-          user_id: user.id,
-          company_id: user.company_id,
-          redirect_uri: "https://claude.ai/cb",
-          code_challenge: "challenge",
-          scopes: ["mcp:read"]
-        },
-        actor: ServerActor.new()
-      )
+    issued = Flow.issue_code(User.admin())
 
     assert issued.code_hash == OpaqueToken.hash(issued.__metadata__.code)
-    refute issued.code_hash == issued.__metadata__.code
     assert issued.code_challenge_method == :S256
     assert_in_delta DateTime.diff(issued.expires_at, DateTime.utc_now()), 600, 5
 

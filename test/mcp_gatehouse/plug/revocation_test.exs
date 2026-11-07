@@ -14,18 +14,16 @@ defmodule McpGatehouse.Plug.RevocationTest do
     Flow.connect(User.admin())
   end
 
-  defp works?(access_token), do: Flow.rpc("tools/list", %{}, access_token).status == 200
-
   test "another client cannot revoke a grant it does not own", %{tokens: tokens} do
     %{"client_id" => other} = Flow.register()
 
     assert Flow.revoke(%{"token" => tokens["access_token"], "client_id" => other}).status == 200
-    assert works?(tokens["access_token"])
+    assert Flow.authenticates?(tokens["access_token"])
   end
 
   test "a request with no client_id revokes nothing", %{tokens: tokens} do
     assert Flow.revoke(%{"token" => tokens["access_token"]}).status == 200
-    assert works?(tokens["access_token"])
+    assert Flow.authenticates?(tokens["access_token"])
   end
 
   test "the owning client revokes its own grant", %{client_id: client_id, tokens: tokens} do
@@ -33,7 +31,7 @@ defmodule McpGatehouse.Plug.RevocationTest do
 
     assert conn.status == 200
     assert conn.resp_body == ""
-    refute works?(tokens["access_token"])
+    refute Flow.authenticates?(tokens["access_token"])
 
     {:ok, revoked} = AccessToken.get_by_token(tokens["access_token"], actor: ServerActor.new())
     assert revoked.revoked_at
@@ -43,7 +41,7 @@ defmodule McpGatehouse.Plug.RevocationTest do
     assert Flow.revoke(%{"token" => tokens["refresh_token"], "client_id" => client_id}).status ==
              200
 
-    refute works?(tokens["access_token"])
+    refute Flow.authenticates?(tokens["access_token"])
     assert Flow.refresh(client_id, tokens["refresh_token"]).status == 400
   end
 

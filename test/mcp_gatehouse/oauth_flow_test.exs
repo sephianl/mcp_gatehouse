@@ -12,8 +12,6 @@ defmodule McpGatehouse.OAuthFlowTest do
   alias McpGatehouse.Test.Flow
   alias McpGatehouse.Test.User
 
-  defp tools_list_status(access_token), do: Flow.rpc("tools/list", %{}, access_token).status
-
   test "register, consent, exchange, call, refresh and revoke" do
     user = User.admin()
 
@@ -52,13 +50,13 @@ defmodule McpGatehouse.OAuthFlowTest do
     refute refreshed["access_token"] == first["access_token"]
     refute refreshed["refresh_token"] == first["refresh_token"]
 
-    assert tools_list_status(first["access_token"]) == 401
-    assert tools_list_status(refreshed["access_token"]) == 200
+    refute Flow.authenticates?(first["access_token"])
+    assert Flow.authenticates?(refreshed["access_token"])
 
     assert Flow.revoke(%{"token" => refreshed["access_token"], "client_id" => client_id}).status ==
              200
 
-    assert tools_list_status(refreshed["access_token"]) == 401
+    refute Flow.authenticates?(refreshed["access_token"])
   end
 
   test "a token's access expires an hour after minting" do

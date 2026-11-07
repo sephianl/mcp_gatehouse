@@ -14,6 +14,7 @@ defmodule McpGatehouse.Plug.BearerTest do
   alias McpGatehouse.OAuth.ServerActor
   alias McpGatehouse.Plug.Bearer
   alias McpGatehouse.Test.AccessToken
+  alias McpGatehouse.Test.ConfiguredServer
   alias McpGatehouse.Test.Flow
   alias McpGatehouse.Test.Server
   alias McpGatehouse.Test.User
@@ -48,6 +49,12 @@ defmodule McpGatehouse.Plug.BearerTest do
 
   test "an unknown token is rejected" do
     assert_challenged(Flow.rpc("tools/list", %{}, "not-a-real-token"), true)
+  end
+
+  test "a refresh token is not an access token" do
+    refresh_token = Flow.mint(User.admin()).__metadata__.refresh_token
+
+    assert_challenged(Flow.rpc("tools/list", %{}, refresh_token), true)
   end
 
   test "an expired token is rejected" do
@@ -127,5 +134,15 @@ defmodule McpGatehouse.Plug.BearerTest do
     test "assigns the token row for host plugs", %{conn: conn, minted: minted} do
       assert conn.assigns.mcp_access_token.id == minted.id
     end
+  end
+
+  test "the token's scopes override an mcp_scopes key in the host's context" do
+    conn =
+      :post
+      |> conn("/")
+      |> put_req_header("authorization", "Bearer " <> token_for(User.admin()))
+      |> Bearer.call(Bearer.init(server: ConfiguredServer))
+
+    assert PlugHelpers.get_context(conn) == %{api?: true, mcp_scopes: ["mcp:read"]}
   end
 end

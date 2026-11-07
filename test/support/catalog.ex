@@ -1,7 +1,8 @@
 defmodule McpGatehouse.Test.Catalog do
   @moduledoc """
-  A host domain carrying an MCP tool, with the read-only scope policy added as a
-  host would add it.
+  A host domain carrying MCP tools, with the read-only scope policy added as a
+  host would add it. `create_widget` writes; the test routers do not serve it,
+  so only a test that names it in `tools:` reaches it.
   """
   use Ash.Domain,
     extensions: [AshAi],
@@ -23,6 +24,10 @@ defmodule McpGatehouse.Test.Catalog do
       #{ToolDocs.paging()}
       """
 
+      argument :context, Ash.Type.String, description: Intent.description()
+    end
+
+    tool :create_widget, Widget, :create do
       argument :context, Ash.Type.String, description: Intent.description()
     end
   end

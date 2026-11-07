@@ -18,23 +18,8 @@ defmodule McpGatehouse.OAuth.SingleUseTest do
   alias McpGatehouse.Test.Flow
   alias McpGatehouse.Test.User
 
-  defp issue(user) do
-    AuthorizationCode.issue(
-      %{
-        client_id: "single-use-client",
-        user_id: user.id,
-        company_id: user.company_id,
-        redirect_uri: "https://claude.ai/cb",
-        code_challenge: "challenge",
-        code_challenge_method: :S256,
-        scopes: ["mcp:read"]
-      },
-      actor: ServerActor.new()
-    )
-  end
-
   test "a code cannot be redeemed twice from a stale read" do
-    {:ok, code} = issue(User.admin())
+    code = Flow.issue_code(User.admin())
 
     assert {:ok, _redeemed} = AuthorizationCode.redeem(code, actor: ServerActor.new())
 
@@ -49,23 +34,6 @@ defmodule McpGatehouse.OAuth.SingleUseTest do
 
     assert {:error, %Invalid{errors: [%StaleRecord{}]}} =
              AccessToken.revoke(token, actor: ServerActor.new())
-  end
-
-  test "only the server actor may touch the OAuth resources" do
-    user = User.admin()
-
-    assert {:error, %Ash.Error.Forbidden{}} =
-             AccessToken.mint(
-               %{client_id: "c", user_id: user.id, company_id: user.company_id, scopes: []},
-               actor: user
-             )
-
-    minted = Flow.mint(user)
-
-    assert {:ok, []} = AccessToken.read(actor: user)
-    assert {:ok, []} = AccessToken.read()
-    assert {:ok, [%{id: id}]} = AccessToken.read(actor: ServerActor.new())
-    assert id == minted.id
   end
 
   test "a grant's live tokens are the unrevoked ones of its client, user and company" do

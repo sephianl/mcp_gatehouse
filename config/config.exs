@@ -20,6 +20,6 @@ if config_env() == :test do
 
   config :mcp_gatehouse,
     ash_domains: [McpGatehouse.Tools, McpGatehouse.Test.OAuth, McpGatehouse.Test.Catalog],
-    filtered_parameters: ~w(password token secret code_verifier code_challenge),
+    filtered_parameters: ~w(password token secret code_verifier code_challenge iban),
     rate_limiter: McpGatehouse.Test.RateLimiterStub
 end

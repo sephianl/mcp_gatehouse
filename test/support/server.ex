@@ -102,7 +102,10 @@ defmodule McpGatehouse.Test.UnconfiguredServer do
 end
 
 defmodule McpGatehouse.Test.ConfiguredServer do
-  @moduledoc "A host server answering every optional callback with a non-default value."
+  @moduledoc """
+  A host server answering every optional callback with a non-default value. Its
+  `context/1` also names `mcp_scopes`, which the token's own scopes must override.
+  """
   @behaviour McpGatehouse.Server
 
   alias McpGatehouse.Test.Server
@@ -126,7 +129,7 @@ defmodule McpGatehouse.Test.ConfiguredServer do
   @impl true
   defdelegate capture_event(event, distinct_id, company_id, properties), to: Server
   @impl true
-  defdelegate context(token), to: Server
+  def context(_token), do: %{api?: true, mcp_scopes: ["mcp:read", "mcp:write"]}
   @impl true
   def filtered_parameters, do: ["fuel", "apiKey"]
   @impl true

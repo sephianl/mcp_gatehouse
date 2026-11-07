@@ -12,6 +12,7 @@ defmodule McpGatehouse.Test.Flow do
   alias McpGatehouse.OAuth.ServerActor
   alias McpGatehouse.Plug.Token
   alias McpGatehouse.Test.AccessToken
+  alias McpGatehouse.Test.AuthorizationCode
   alias McpGatehouse.Test.Router
   alias McpGatehouse.Test.Server
 
@@ -168,6 +169,27 @@ defmodule McpGatehouse.Test.Flow do
     minted
   end
 
+  @doc "What the consent step issues a code with for `user`, leaving the challenge method to its default."
+  @spec code_attrs(term()) :: map()
+  def code_attrs(user) do
+    %{
+      client_id: "test-client",
+      user_id: user.id,
+      company_id: user.company_id,
+      redirect_uri: "https://claude.ai/cb",
+      code_challenge: "challenge",
+      scopes: ["mcp:read"]
+    }
+  end
+
+  @doc "Issues an authorization code row directly, as the consent step would, for `user`."
+  @spec issue_code(term()) :: struct()
+  def issue_code(user) do
+    {:ok, issued} = AuthorizationCode.issue(code_attrs(user), actor: ServerActor.new())
+
+    issued
+  end
+
   @spec request_meta() :: map()
   def request_meta do
     %{
@@ -188,19 +210,23 @@ defmodule McpGatehouse.Test.Flow do
 
   @doc """
   The same request through the `:mcp` plugs built for `server`, so a test can
-  pick the host's optional callbacks per request.
+  pick the host's optional callbacks per request, serving `tools`.
   """
-  @spec rpc_through(module(), String.t(), map(), String.t() | nil) :: Plug.Conn.t()
-  def rpc_through(server, method, params, token) do
+  @spec rpc_through(module(), String.t(), map(), String.t() | nil, [atom()]) :: Plug.Conn.t()
+  def rpc_through(server, method, params, token, tools \\ [:list_widgets, :report_missing_capability]) do
     :post
     |> conn("/", Jason.encode!(rpc_body(method, params)))
     |> rpc_headers(method, params, token, [])
     |> run([
       {McpGatehouse.Plug.Bearer, server: server},
       {McpGatehouse.Plug.Analytics, server: server},
-      {AshAi.Mcp.Router, tools: [:list_widgets, :report_missing_capability], otp_app: :mcp_gatehouse}
+      {AshAi.Mcp.Router, tools: tools, otp_app: :mcp_gatehouse}
     ])
   end
+
+  @doc "Whether `access_token` still authenticates a `tools/list` at `/mcp`."
+  @spec authenticates?(String.t()) :: boolean()
+  def authenticates?(access_token), do: rpc("tools/list", %{}, access_token).status == 200
 
   @spec call_tool(String.t(), map(), String.t()) :: map()
   def call_tool(name, arguments, token) do

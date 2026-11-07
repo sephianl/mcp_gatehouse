@@ -9,6 +9,8 @@ defmodule McpGatehouse.ReadOnlyScopePolicyTest do
 
   alias Ash.Error.Forbidden
   alias McpGatehouse.Checks.McpTokenLacksWriteScope
+  alias McpGatehouse.Test.Flow
+  alias McpGatehouse.Test.Server
   alias McpGatehouse.Test.User
   alias McpGatehouse.Test.Widget
 
@@ -20,6 +22,12 @@ defmodule McpGatehouse.ReadOnlyScopePolicyTest do
   end
 
   defp as_mcp(user, scopes), do: [actor: user, context: %{mcp_scopes: scopes}]
+
+  defp widget_names(user) do
+    {:ok, widgets} = Widget.list(actor: user)
+
+    widgets |> Enum.map(& &1.name) |> Enum.sort()
+  end
 
   test "a read-only token cannot create, update or destroy", %{user: user, widget: widget} do
     opts = as_mcp(user, ["mcp:read"])
@@ -36,6 +44,26 @@ defmodule McpGatehouse.ReadOnlyScopePolicyTest do
              Widget.list(Keyword.put(opts, :page, limit: 10))
 
     assert {:ok, 0} = Widget.count_widgets(opts)
+  end
+
+  test "over MCP, the bearer token's scopes decide whether a write tool runs", %{user: user} do
+    create = fn scopes ->
+      Server
+      |> Flow.rpc_through(
+        "tools/call",
+        %{"name" => "create_widget", "arguments" => %{"input" => %{"name" => "gear"}}},
+        Flow.mint(user, scopes: scopes).__metadata__.token,
+        [:create_widget]
+      )
+      |> Flow.json()
+      |> get_in(["result", "isError"])
+    end
+
+    assert create.(["mcp:read"]) == true
+    assert widget_names(user) == ["sprocket"]
+
+    assert create.(["mcp:read", "mcp:write"]) == false
+    assert widget_names(user) == ["gear", "sprocket"]
   end
 
   test "a token granted mcp:write is not restricted by the policy", %{user: user} do
