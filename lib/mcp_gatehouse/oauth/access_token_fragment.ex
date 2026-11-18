@@ -87,8 +87,6 @@ defmodule McpGatehouse.OAuth.AccessTokenFragment do
     update :revoke do
       description "Revokes a token, and only if it was not already revoked, so a replayed refresh cannot rotate the same token twice."
 
-      require_atomic? false
-
       change {StampOnce, attribute: :revoked_at}
     end
   end

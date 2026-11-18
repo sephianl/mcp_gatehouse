@@ -14,14 +14,21 @@ defmodule McpGatehouse.OAuth.Changes.StampOnce do
   use Ash.Resource.Change
 
   alias Ash.Changeset
+  alias Ash.Expr
 
-  require Ash.Expr
+  require Expr
 
   @impl true
   @spec change(Changeset.t(), keyword(), Ash.Resource.Change.Context.t()) :: Changeset.t()
   def change(changeset, [attribute: attribute], _context) do
     changeset
-    |> Changeset.filter(Ash.Expr.expr(is_nil(^Ash.Expr.ref(attribute))))
+    |> only_when_unset(attribute)
     |> Changeset.force_change_attribute(attribute, DateTime.utc_now())
   end
+
+  @impl true
+  def atomic(changeset, [attribute: attribute], _context),
+    do: {:atomic, only_when_unset(changeset, attribute), %{attribute => Expr.expr(now())}}
+
+  defp only_when_unset(changeset, attribute), do: Changeset.filter(changeset, Expr.expr(is_nil(^Expr.ref(attribute))))
 end

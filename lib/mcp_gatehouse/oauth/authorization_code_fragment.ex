@@ -11,8 +11,7 @@ defmodule McpGatehouse.OAuth.AuthorizationCodeFragment do
 
   The host owns the module, domain, data layer, table and any foreign keys on
   `user_id` and `company_id` (declare them with `define_attribute?: false`).
-  Every action is authorized for `McpGatehouse.OAuth.ServerActor` only, and
-  there is deliberately no primary read.
+  Every action is authorized for `McpGatehouse.OAuth.ServerActor` only.
   """
   use Spark.Dsl.Fragment, of: Ash.Resource, authorizers: [Ash.Policy.Authorizer]
 
@@ -22,6 +21,7 @@ defmodule McpGatehouse.OAuth.AuthorizationCodeFragment do
   alias McpGatehouse.OAuth.Preparations.HashedLookup
 
   code_interface do
+    define :read, action: :read
     define :issue, action: :issue
     define :get_by_code, args: [:code], action: :by_code
     define :redeem, action: :redeem
@@ -46,6 +46,12 @@ defmodule McpGatehouse.OAuth.AuthorizationCodeFragment do
       change GenerateCode
     end
 
+    read :read do
+      description "Every code row, unfiltered. Present so a single-use redeem can run as one atomic update; the token exchange goes through `by_code`."
+
+      primary? true
+    end
+
     read :by_code do
       description "Looks a code up by the hash of its opaque value during the token exchange. Says nothing about whether it is still redeemable."
 
@@ -58,8 +64,6 @@ defmodule McpGatehouse.OAuth.AuthorizationCodeFragment do
 
     update :redeem do
       description "Spends a code, and only if it was not already spent, so replaying the same code cannot mint a second token."
-
-      require_atomic? false
 
       change {StampOnce, attribute: :redeemed_at}
     end
